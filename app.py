@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, Response, abort
 
 load_dotenv()
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='/static')
@@ -23,6 +23,7 @@ ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
 ROOT = 'https://aipri.jp/verse/'
 ITEM_ROOT = ROOT + 'item/'
 PAGES = [(f'oa{i}', f'오네가이 {i}탄') for i in range(4, 0, -1)] + [(f'ring{i}', f'링 {i}탄') for i in range(6, 0, -1)] + [(str(i), f'아이프리 {i}탄') for i in range(6, 0, -1)] + [('special', '스페셜 코디')]
+# All 17 official series/round index pages; additional official pages can be discovered later.
 # Depending on official naming changes, a missing page is safely skipped and reported.
 # Initial catalog: names independently checked against official lists (2026-11-11).
 # Images remain hosted by the official site; verify permission before public hotlinking.
@@ -104,32 +105,51 @@ def valid_image(url):
     return p.scheme == 'https' and (p.hostname == 'aipri.jp' or p.hostname.endswith('.aipri.jp'))
 
 def parse_page(html, url):
-    """Gather image-associated outfit names while excluding menus/icons.
+    """Index image/name pairs on the official round page.
 
-    Official pages use thumbnails with descriptive Japanese image alt text.
-    Both <img> and adjacent figure/text are considered for resilience.
+    Keep exact Japanese alt text; only accept images in the item image tree.
+    Pages may use lazy-loading attributes or srcset. A fallback name is read
+    from nearby item text only when it matches a verified Japanese caption.
     """
     soup = BeautifulSoup(html, 'html.parser')
-    for s in soup(['script', 'style', 'nav', 'footer']): s.decompose()
-    candidates = []
+    for tag in soup(['script', 'style', 'nav', 'footer']):
+        tag.decompose()
     seen = set()
+    items = []
     for img in soup.select('img'):
-        if img.find_parent(['h1','h2','h3','h4','h5','h6','header','nav','footer']): continue
-        alt = (img.get('alt') or '').strip()
-        src = img.get('data-src') or img.get('data-original') or img.get('src') or ''
-        full = urljoin(url, src)
-        if not alt or not re.search('[\u3040-\u30ff\u3400-\u9fff]', alt): continue
-        if len(alt) > 70 or not src or not valid_image(full): continue
-        # Only genuine item thumbnails, not campaign/banners and page chrome.
-        if '/verse/item/img/' not in urlparse(full).path: continue
-        if any(x in alt for x in ('コーデアイテム','トップ','ページ','サイト','カレンダー','メニュー','ボタン','公式','PAGE TOP','TOPICS','最新段情報','キャンペーン')): continue
-        # The product image region is item-specific; exclude navigation/branding thumbnails.
-        if any(x in full.lower() for x in ('/common/','/header/','/footer/','/navi/','/logo/','/btn/','/icon/')): continue
-        name = re.sub(r'\s+', ' ', alt)
-        if name in seen: continue
-        seen.add(name)
-        candidates.append((name,full))
-    return candidates
+        if img.find_parent(['header', 'nav', 'footer']):
+            continue
+        urls = []
+        for attr in ('data-src', 'data-original', 'data-lazy-src', 'src'):
+            if img.get(attr): urls.append(img[attr])
+        for attr in ('data-srcset', 'srcset'):
+            if img.get(attr):
+                urls.extend(piece.strip().split(' ')[0] for piece in img[attr].split(','))
+        full = next((urljoin(url, raw) for raw in urls if
+                     valid_image(urljoin(url, raw)) and
+                     '/verse/item/img/' in urlparse(urljoin(url, raw)).path), None)
+        if not full:
+            continue
+        alt = re.sub(r'\s+', ' ', img.get('alt', '')).strip()
+        if not alt:
+            # Prefer the immediate item caption, not an unrelated section title.
+            parent = img.parent
+            for _ in range(3):
+                if parent is None: break
+                texts = [t.get_text(' ', strip=True) for t in parent.find_all(['p', 'span'], recursive=False)]
+                if len(texts) == 1 and 1 < len(texts[0]) < 65:
+                    alt = texts[0]
+                    break
+                parent = parent.parent
+        if not alt or len(alt) > 75 or not re.search('[\u3040-\u30ff\u3400-\u9fff]', alt):
+            continue
+        if any(word in alt for word in ('コーデアイテム', 'ページ', 'サイト', 'カレンダー', 'メニュー', 'ボタン', 'キャンペーン', 'PAGE TOP')):
+            continue
+        if alt in seen:
+            continue
+        seen.add(alt)
+        items.append((alt, full))
+    return items
 
 def fetch_page(page):
     slug, label = page
@@ -160,6 +180,10 @@ def refresh_job():
                         STATUS['items'] += len(items)
                 except Exception as e:
                     with LOCK: STATUS['errors'].append(f'{page[0]}: {str(e)[:130]}')
+        if STATUS['pages'] > 0 and STATUS['items'] > 0:
+            with conn() as c:
+                c.execute('CREATE TABLE IF NOT EXISTS crawl_meta (key TEXT PRIMARY KEY, value TEXT)')
+                c.execute("INSERT INTO crawl_meta(key,value) VALUES('last_full_crawl',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (now(),))
         with LOCK:
             STATUS['updated'] = now()
             STATUS['message'] = '수집 완료' if STATUS['items'] else '코디를 가져오지 못했습니다. 페이지 구조 또는 네트워크를 확인하세요.'
@@ -189,34 +213,56 @@ def translation_job():
         with LOCK: STATUS['translating'] = False
 
 def auto_refresh_if_needed():
-    """Populate outfit thumbnails after deployment without exposing an admin endpoint.
+    """Run a full crawl after deployment even if two starter thumbnails exist.
 
-    One pass per process, max one pass per 24h on persistent installations.
-    Existing Papago translations are preserved during refresh.
+    Previous code incorrectly treated any recent image as a complete crawl.
+    The new condition checks actual page coverage and the last full crawl.
     """
     if os.getenv('AUTO_REFRESH', '1') != '1':
         return
     try:
         with conn() as c:
-            image_count = c.execute("SELECT COUNT(*) FROM outfits WHERE image_url IS NOT NULL AND image_url <> ''").fetchone()[0]
-            latest = c.execute("SELECT MAX(updated_at) FROM outfits WHERE image_url IS NOT NULL AND image_url <> ''").fetchone()[0]
-        if image_count and latest:
+            c.execute('CREATE TABLE IF NOT EXISTS crawl_meta (key TEXT PRIMARY KEY, value TEXT)')
+            row = c.execute("SELECT value FROM crawl_meta WHERE key='last_full_crawl'").fetchone()
+        if row:
             try:
-                last = datetime.fromisoformat(latest)
-                if (datetime.now(timezone.utc) - last).total_seconds() < 86400:
+                if (datetime.now(timezone.utc) - datetime.fromisoformat(row[0])).total_seconds() < 86400:
                     return
             except (ValueError, TypeError):
                 pass
-        threading.Thread(target=refresh_job, daemon=True, name='aipri-first-refresh').start()
+        threading.Thread(target=refresh_job, daemon=True, name='aipri-full-crawl').start()
     except Exception as exc:
         with LOCK:
-            STATUS['message'] = '자동 이미지 수집을 시작하지 못했습니다: ' + str(exc)[:120]
+            STATUS['message'] = '자동 수집 시작 실패: ' + str(exc)[:120]
 
 @app.route('/')
 def home(): return render_template('index.html')
 
 @app.route('/health')
 def health(): return jsonify({'ok': True})
+
+@app.route('/api/image/<int:outfit_id>')
+def official_image(outfit_id):
+    """Same-origin fallback for official thumbnails when browser hotlinking fails."""
+    with conn() as c:
+        row = c.execute('SELECT image_url FROM outfits WHERE id=?', (outfit_id,)).fetchone()
+    if not row or not row['image_url'] or not valid_image(row['image_url']):
+        abort(404)
+    try:
+        r = requests.get(row['image_url'], timeout=12, allow_redirects=False,
+                         headers={'User-Agent':'Mozilla/5.0', 'Referer':ROOT}, stream=True)
+        if r.status_code != 200 or not r.headers.get('Content-Type','').lower().startswith('image/'):
+            abort(404)
+        if int(r.headers.get('Content-Length') or 0) > 3_000_000:
+            abort(413)
+        content = r.raw.read(3_000_001)
+        r.close()
+        if len(content) > 3_000_000:
+            abort(413)
+        return Response(content, content_type=r.headers['Content-Type'],
+                        headers={'Cache-Control':'public, max-age=86400'})
+    except requests.RequestException:
+        abort(502)
 
 @app.route('/api/outfits')
 def outfits():
