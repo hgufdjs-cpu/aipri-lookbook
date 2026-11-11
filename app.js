@@ -34,14 +34,17 @@ function imageEl(x){
 function toggleFavorite(x){const k=keyOf(x);favorites.has(k)?favorites.delete(k):favorites.add(k);saveFavorites();render();}
 function favoriteButton(x){const liked=favorites.has(keyOf(x));const b=el('button',`heart ${liked?'liked':''}`,liked?'♥':'♡');b.type='button';b.title=liked?'즐겨찾기 해제':'즐겨찾기 추가';b.setAttribute('aria-label',b.title);b.setAttribute('aria-pressed',String(liked));b.onclick=e=>{e.stopPropagation();toggleFavorite(x)};return b;}
 function showModal(x){const b=$('#modalBody');b.replaceChildren();const photo=imageEl(x);photo.classList.add('modalphoto');b.append(photo);b.append(el('h2','',x.name_ko||x.name_ja));if(x.name_ko)b.append(el('p','',x.name_ja));else b.append(el('p','', '한국어 이름은 파파고 번역 등록 후 제공됩니다.'));b.append(el('p','',labels[x.series]||x.series));const fav=favoriteButton(x);fav.classList.add('modal-favorite');b.append(fav);const a=el('a','','일본 공식 코디 페이지 보기 ↗');a.href=x.source_url;a.target='_blank';a.rel='noopener noreferrer';b.append(a);$('#modal').hidden=false;$('#closeModal').focus();}
-function results(){const q=norm(query);let arr=all.filter(x=>(series==='all'||x.series===series)&&(!onlyFavorites||favorites.has(keyOf(x)))&&(!q||norm(x.name_ko).includes(q)||norm(x.name_ja).includes(q)));
+// Exclude only confirmed promotional placeholder cards; preserve actual Birthday color outfits.
+const HIDDEN_PROMOTIONAL_NAMES=new Set(['ハッピーバースデー！コーデ']);
+const isHiddenPromotional=x=>HIDDEN_PROMOTIONAL_NAMES.has((x.name_ja||'').normalize('NFKC').trim());
+function results(){const q=norm(query);let arr=all.filter(x=>!isHiddenPromotional(x)&&(series==='all'||x.series===series)&&(!onlyFavorites||favorites.has(keyOf(x)))&&(!q||norm(x.name_ko).includes(q)||norm(x.name_ja).includes(q)));
 if(sortMode==='az')arr.sort((a,b)=>(a.name_ko||a.name_ja).localeCompare(b.name_ko||b.name_ja,'ko'));else if(sortMode==='za')arr.sort((a,b)=>(b.name_ko||b.name_ja).localeCompare(a.name_ko||a.name_ja,'ko'));return arr;}
 function render(){const arr=results();$('#count').textContent=arr.length;$('#favoritesCount').textContent=favorites.size;$('#favoritesOnly').classList.toggle('active',onlyFavorites);$('#favoritesOnly').setAttribute('aria-pressed',String(onlyFavorites));const grid=$('#grid');grid.replaceChildren();$('#empty').hidden=!!arr.length;$('#emptyDescription').textContent=onlyFavorites?'즐겨찾기를 해제하거나 다른 조건으로 검색해 보세요.':'다른 키워드나 일본어 이름으로 검색해 보세요.';
 for(const x of arr.slice(0,visible)){const c=el('article','item');c.tabIndex=0;c.setAttribute('role','button');c.setAttribute('aria-label',(x.name_ko||x.name_ja)+' 상세 보기');const p=imageEl(x);p.append(el('span','tag',labels[x.series]||x.series),favoriteButton(x));const t=el('div','itemtext');t.append(el('div','ko',x.name_ko||x.name_ja),el('div','ja',x.name_ko?x.name_ja:'한국어 번역 미등록'));const foot=el('div','itemfoot');foot.append(el('span','',x.translation_source==='Papago'?'파파고 번역':'공식 일본어명'),el('span','','자세히 ↗'));t.append(foot);c.append(p,t);c.onclick=()=>showModal(x);c.onkeydown=e=>{if(e.target===c&&(e.key==='Enter'||e.key===' ')){e.preventDefault();showModal(x);}};grid.append(c)}
 $('#more').hidden=visible>=arr.length;$('#more').textContent=`더 보기 (${Math.min(visible,arr.length)} / ${arr.length})`;}
 async function load(){try{
   const res=await fetch('/api/outfits',{cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);
-  const d=await res.json();all=d.items||[];render();
+  const d=await res.json();all=(d.items||[]).filter(x=>!isHiddenPromotional(x));render();
   const withImages=all.filter(x=>x.image_url).length;
   const busy=Boolean(d.status?.running);
   $('#notice').textContent=all.length
