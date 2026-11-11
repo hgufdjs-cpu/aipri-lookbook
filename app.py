@@ -1,5 +1,6 @@
 """Aipri Verse unofficial bilingual outfit search."""
 import os
+import io
 import hmac
 import re
 import sqlite3
@@ -11,6 +12,7 @@ from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from PIL import Image, UnidentifiedImageError
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, Response, abort
@@ -259,6 +261,15 @@ def official_image(outfit_id):
         r.close()
         if len(content) > 3_000_000:
             abort(413)
+        # Do not show horizontal text-only event/collaboration banners as outfit pictures.
+        # Keep the outfit entry and its Japanese title; display the neutral placeholder.
+        try:
+            with Image.open(io.BytesIO(content)) as image:
+                width, height = image.size
+                if width < 40 or height < 40 or width / max(height, 1) > 2.0:
+                    abort(404)
+        except (UnidentifiedImageError, OSError, ValueError):
+            abort(404)
         return Response(content, content_type=r.headers['Content-Type'],
                         headers={'Cache-Control':'public, max-age=86400'})
     except requests.RequestException:

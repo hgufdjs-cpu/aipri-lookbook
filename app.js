@@ -8,7 +8,17 @@ const saveFavorites=()=>{try{localStorage.setItem(STORAGE,JSON.stringify([...fav
 const keyOf=x=>`${x.series}|${x.name_ja}`;
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
 function norm(s){return (s||'').normalize('NFKC').replace(/\s/g,'').toLocaleLowerCase();}
-function imageEl(x){const p=el('div','photo');if(x.image_url){const im=el('img');im.loading='lazy';im.alt=x.name_ja;im.referrerPolicy='no-referrer';let triedProxy=false;im.src=x.image_url;im.onerror=()=>{if(!triedProxy){triedProxy=true;im.src='/api/image/'+encodeURIComponent(x.id);}else{im.remove();p.prepend(el('div','placeholder','✦'));}};p.append(im);}else p.append(el('div','placeholder','✦'));return p;}
+function imageEl(x){
+  const p=el('div','photo');
+  if(x.image_url){
+    const im=el('img'); im.loading='lazy'; im.alt=x.name_ja;
+    // The server checks actual image dimensions and refuses wide title banners.
+    im.src='/api/image/'+encodeURIComponent(x.id);
+    im.onerror=()=>{im.remove();p.prepend(el('div','placeholder','✦'));};
+    p.append(im);
+  }else p.append(el('div','placeholder','✦'));
+  return p;
+}
 function toggleFavorite(x){const k=keyOf(x);favorites.has(k)?favorites.delete(k):favorites.add(k);saveFavorites();render();}
 function favoriteButton(x){const liked=favorites.has(keyOf(x));const b=el('button',`heart ${liked?'liked':''}`,liked?'♥':'♡');b.type='button';b.title=liked?'즐겨찾기 해제':'즐겨찾기 추가';b.setAttribute('aria-label',b.title);b.setAttribute('aria-pressed',String(liked));b.onclick=e=>{e.stopPropagation();toggleFavorite(x)};return b;}
 function showModal(x){const b=$('#modalBody');b.replaceChildren();const photo=imageEl(x);photo.classList.add('modalphoto');b.append(photo);b.append(el('h2','',x.name_ko||x.name_ja));if(x.name_ko)b.append(el('p','',x.name_ja));else b.append(el('p','', '한국어 이름은 파파고 번역 등록 후 제공됩니다.'));b.append(el('p','',labels[x.series]||x.series));const fav=favoriteButton(x);fav.classList.add('modal-favorite');b.append(fav);const a=el('a','','일본 공식 코디 페이지 보기 ↗');a.href=x.source_url;a.target='_blank';a.rel='noopener noreferrer';b.append(a);$('#modal').hidden=false;$('#closeModal').focus();}
