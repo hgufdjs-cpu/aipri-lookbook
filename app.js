@@ -14,7 +14,19 @@ function imageEl(x){
     const im=el('img'); im.loading='lazy'; im.alt=x.name_ja;
     // The server checks actual image dimensions and refuses wide title banners.
     im.src='/api/image/'+encodeURIComponent(x.id);
-    im.onerror=()=>{im.remove();p.prepend(el('div','placeholder','✦'));};
+    im.onerror=async()=>{
+      im.remove();
+      // Only remove the entire card when the server has confirmed a wide banner.
+      // A broken/blocked image is not proof that the outfit is promotional.
+      try {
+        const r=await fetch('/api/image/'+encodeURIComponent(x.id),{cache:'no-store'});
+        if(r.status===410){
+          const card=p.closest('.item');
+          if(card){card.remove();return;}
+        }
+      } catch {}
+      p.prepend(el('div','placeholder','✦'));
+    };
     p.append(im);
   }else p.append(el('div','placeholder','✦'));
   return p;

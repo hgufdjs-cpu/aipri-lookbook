@@ -150,42 +150,8 @@ def parse_page(html, url):
         if alt in seen:
             continue
         seen.add(alt)
-        # Only accept a separately referenced popup/detail image, not a thumbnail or banner.
-        portrait = fullbody_candidate(img, url)
-        items.append((alt, portrait))
+        items.append((alt, full))
     return items
-
-
-def fullbody_candidate(img, page_url):
-    """Find the popup's actual image URL in item markup, without guessing a filename."""
-    scopes = []
-    node = img
-    for _ in range(5):
-        if node is None: break
-        scopes.append(node)
-        node = node.parent
-    candidates = []
-    for depth, scope in enumerate(scopes):
-        for tag in [scope] + list(scope.find_all(['a', 'img'], recursive=True))[:16]:
-            for key in ('data-full', 'data-full-image', 'data-large', 'data-image',
-                        'data-modal', 'data-modal-src', 'data-src', 'href', 'src'):
-                value = tag.get(key)
-                if not value or not isinstance(value, str): continue
-                absolute = urljoin(page_url, value)
-                if not valid_image(absolute): continue
-                path = urlparse(absolute).path.lower()
-                if not re.search(r'\.(?:png|webp|jpe?g)$', path): continue
-                if any(t in path for t in ('banner', 'bnr', 'logo', 'icon', 'title', 'button')): continue
-                if '/verse/item/img/' not in path: continue
-                score = 15 if key in ('data-full', 'data-full-image', 'data-large', 'data-modal-src') else 0
-                score += 10 if any(t in path for t in ('modal', 'large', 'detail', 'full')) else 0
-                score -= 12 if any(t in path for t in ('thumb', 'thumbnail', '_s.')) else 0
-                score -= depth * 3
-                candidates.append((score, absolute))
-        if candidates and max(x[0] for x in candidates) >= 12: break
-    if not candidates: return None
-    best = max(candidates, key=lambda x:x[0])
-    return best[1] if best[0] >= 10 and best[1] != urljoin(page_url, img.get('src', '')) else None
 
 def fetch_page(page):
     slug, label = page
@@ -300,8 +266,10 @@ def official_image(outfit_id):
         try:
             with Image.open(io.BytesIO(content)) as image:
                 width, height = image.size
-                if width < 40 or height < 40 or width / max(height, 1) > 2.0:
+                if width < 40 or height < 40:
                     abort(404)
+                if width / max(height, 1) > 1.75:
+                    abort(410)
         except (UnidentifiedImageError, OSError, ValueError):
             abort(404)
         return Response(content, content_type=r.headers['Content-Type'],
@@ -316,6 +284,13 @@ def outfits():
     with conn() as c: rows = [dict(x) for x in c.execute('SELECT * FROM outfits ORDER BY series DESC, id DESC').fetchall()]
     if series and series != 'all': rows = [r for r in rows if r['series'] == series]
     if q: rows = [r for r in rows if q in normalize(r['name_ja']) or q in normalize(r['name_ko'])]
+    # Only clear promotional/banner entries; never remove legitimate outfit names by keyword alone.
+    def promotional(r):
+        name = r['name_ja']
+        img = (r.get('image_url') or '').lower()
+        return any(t in img for t in ('/banner/', '/bnr/', '_banner.', '_bnr.')) or (
+            ('コラボ' in name or 'キャンペーン' in name) and not ('コーデ' in name))
+    rows = [r for r in rows if not promotional(r)]
     return jsonify({'items': rows[:6000], 'total': len(rows), 'papago': papago_ready(), 'status':STATUS})
 
 def admin_authorized():
