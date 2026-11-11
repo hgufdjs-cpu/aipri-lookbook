@@ -85,7 +85,22 @@ for(const x of arr.slice(0,visible)){const c=el('article','item');c.tabIndex=0;c
 $('#more').hidden=visible>=arr.length;$('#more').textContent=`더 보기 (${Math.min(visible,arr.length)} / ${arr.length})`;}
 async function load(){try{
   const res=await fetch('/api/outfits',{cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);
-  const d=await res.json();all=(d.items||[]).filter(x=>!isHiddenPromotional(x));addKoreanNames(all);render();
+  const d=await res.json();all=(d.items||[]).filter(x=>!isHiddenPromotional(x));addKoreanNames(all);
+  // Verified translations override the provisional Korean names.
+  try {
+    const verifiedResponse=await fetch('/static/papago_verified.json?v=2',{cache:'no-store'});
+    if(verifiedResponse.ok){
+      const dictionary=await verifiedResponse.json();
+      for(const x of all){
+        const record=dictionary[x.name_ja];
+        if(record && record.verified===true && typeof record.ko==='string' && record.ko.trim()){
+          x.name_ko=record.ko.trim();
+          x.translation_source='Papago verified';
+        }
+      }
+    }
+  }catch(error){console.warn('Verified translations unavailable',error);}
+  render();
   const withImages=all.filter(x=>x.image_url).length;
   const busy=Boolean(d.status?.running);
   $('#notice').textContent=all.length
