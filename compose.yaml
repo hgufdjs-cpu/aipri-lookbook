@@ -1,0 +1,16 @@
+services:
+  website:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DB_PATH: /data/aipri.db
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
+      PAPAGO_CLIENT_ID: ${PAPAGO_CLIENT_ID:-}
+      PAPAGO_CLIENT_SECRET: ${PAPAGO_CLIENT_SECRET:-}
+      SEED_VERIFIED: "1"
+    volumes:
+      - aipri_data:/data
+    restart: unless-stopped
+volumes:
+  aipri_data:
