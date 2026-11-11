@@ -4,6 +4,7 @@ import hmac
 import re
 import sqlite3
 import threading
+import time
 import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
@@ -24,7 +25,11 @@ ITEM_ROOT = ROOT + 'item/'
 PAGES = [(f'oa{i}', f'오네가이 {i}탄') for i in range(4, 0, -1)] + [(f'ring{i}', f'링 {i}탄') for i in range(6, 0, -1)] + [(str(i), f'아이프리 {i}탄') for i in range(6, 0, -1)] + [('special', '스페셜 코디')]
 # Depending on official naming changes, a missing page is safely skipped and reported.
 # Initial catalog: names independently checked against official lists (2026-11-11).
-# No official images are bundled or redistributed in this sample.
+# Images remain hosted by the official site; verify permission before public hotlinking.
+KNOWN_OFFICIAL_THUMBS = {
+    ('oa4','スイートいちごグリーン'): 'https://aipri.jp/verse/item/img/oa4/OA4-076_thumb.webp',
+    ('oa4','とんがりぼうしまほうつかいピンク'): 'https://aipri.jp/verse/item/img/oa4/OAF4-007-1_thumb.webp',
+}
 VERIFIED_NAMES = [(x,'oa4') for x in [
  'スイートいちごグリーン','トランプレディホワイト','アイプリだいすきナンバーワン！',
  'スマイルハートバズリウムピンク','スマイルハートバズリウムグリーン','スマイルハートバズリウムレッド',
@@ -76,6 +81,9 @@ def init_db():
             for name, slug in VERIFIED_NAMES:
                 c.execute('''INSERT OR IGNORE INTO outfits(name_ja,series,source_url,updated_at) VALUES(?,?,?,?)''',
                           (name,slug,ITEM_ROOT + slug + '.html',now()))
+                known_image = KNOWN_OFFICIAL_THUMBS.get((slug,name))
+                if known_image:
+                    c.execute("UPDATE outfits SET image_url=? WHERE name_ja=? AND series=? AND (image_url IS NULL OR image_url='')", (known_image,name,slug))
 
 
 def now(): return datetime.now(timezone.utc).isoformat(timespec='seconds')
@@ -112,6 +120,8 @@ def parse_page(html, url):
         full = urljoin(url, src)
         if not alt or not re.search('[\u3040-\u30ff\u3400-\u9fff]', alt): continue
         if len(alt) > 70 or not src or not valid_image(full): continue
+        # Only genuine item thumbnails, not campaign/banners and page chrome.
+        if '/verse/item/img/' not in urlparse(full).path: continue
         if any(x in alt for x in ('コーデアイテム','トップ','ページ','サイト','カレンダー','メニュー','ボタン','公式','PAGE TOP','TOPICS','最新段情報','キャンペーン')): continue
         # The product image region is item-specific; exclude navigation/branding thumbnails.
         if any(x in full.lower() for x in ('/common/','/header/','/footer/','/navi/','/logo/','/btn/','/icon/')): continue
@@ -124,7 +134,7 @@ def parse_page(html, url):
 def fetch_page(page):
     slug, label = page
     url = ITEM_ROOT + slug + '.html'
-    r = requests.get(url, timeout=15, headers={'User-Agent':'Mozilla/5.0 (compatible; AipriOutfitIndexer/1.0; personal fan directory)'})
+    r = requests.get(url, timeout=20, headers={'User-Agent':'Mozilla/5.0 (compatible; AipriOutfitIndexer/1.0; personal fan directory)'})
     r.raise_for_status()
     return slug, url, parse_page(r.text,url)
 
@@ -133,7 +143,7 @@ def refresh_job():
     with LOCK:
         STATUS.update(running=True,message='공식 코디 목록을 가져오는 중',pages=0,items=0,errors=[])
     try:
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {pool.submit(fetch_page, p):p for p in PAGES}
             for future in as_completed(futures):
                 page = futures[future]
@@ -178,6 +188,30 @@ def translation_job():
     finally:
         with LOCK: STATUS['translating'] = False
 
+def auto_refresh_if_needed():
+    """Populate outfit thumbnails after deployment without exposing an admin endpoint.
+
+    One pass per process, max one pass per 24h on persistent installations.
+    Existing Papago translations are preserved during refresh.
+    """
+    if os.getenv('AUTO_REFRESH', '1') != '1':
+        return
+    try:
+        with conn() as c:
+            image_count = c.execute("SELECT COUNT(*) FROM outfits WHERE image_url IS NOT NULL AND image_url <> ''").fetchone()[0]
+            latest = c.execute("SELECT MAX(updated_at) FROM outfits WHERE image_url IS NOT NULL AND image_url <> ''").fetchone()[0]
+        if image_count and latest:
+            try:
+                last = datetime.fromisoformat(latest)
+                if (datetime.now(timezone.utc) - last).total_seconds() < 86400:
+                    return
+            except (ValueError, TypeError):
+                pass
+        threading.Thread(target=refresh_job, daemon=True, name='aipri-first-refresh').start()
+    except Exception as exc:
+        with LOCK:
+            STATUS['message'] = '자동 이미지 수집을 시작하지 못했습니다: ' + str(exc)[:120]
+
 @app.route('/')
 def home(): return render_template('index.html')
 
@@ -217,4 +251,5 @@ def translate_all():
 def status(): return jsonify(STATUS)
 
 init_db()
+auto_refresh_if_needed()
 if __name__ == '__main__': app.run(host='127.0.0.1',port=int(os.environ.get('PORT',5000)),debug=False)

@@ -1,6 +1,7 @@
 const $=s=>document.querySelector(s);
 const labels={oa4:'오네가이 4탄',oa3:'오네가이 3탄',oa2:'오네가이 2탄',oa1:'오네가이 1탄',special:'스페셜',...Object.fromEntries(Array.from({length:6},(_,i)=>[`ring${i+1}`,`링 ${i+1}탄`])),...Object.fromEntries(Array.from({length:6},(_,i)=>[`${i+1}`,`아이프리 ${i+1}탄`]))};
 let all=[],series='all',query='',onlyFavorites=false,sortMode='latest',visible=40;
+let imagePolls=0, imagePollTimer=null;
 const STORAGE='aipri-favorites-v1';
 let favorites=new Set();try{favorites=new Set(JSON.parse(localStorage.getItem(STORAGE)||'[]'));}catch{}
 const saveFavorites=()=>{try{localStorage.setItem(STORAGE,JSON.stringify([...favorites]));}catch{}};
@@ -16,7 +17,20 @@ if(sortMode==='az')arr.sort((a,b)=>(a.name_ko||a.name_ja).localeCompare(b.name_k
 function render(){const arr=results();$('#count').textContent=arr.length;$('#favoritesCount').textContent=favorites.size;$('#favoritesOnly').classList.toggle('active',onlyFavorites);$('#favoritesOnly').setAttribute('aria-pressed',String(onlyFavorites));const grid=$('#grid');grid.replaceChildren();$('#empty').hidden=!!arr.length;$('#emptyDescription').textContent=onlyFavorites?'즐겨찾기를 해제하거나 다른 조건으로 검색해 보세요.':'다른 키워드나 일본어 이름으로 검색해 보세요.';
 for(const x of arr.slice(0,visible)){const c=el('article','item');c.tabIndex=0;c.setAttribute('role','button');c.setAttribute('aria-label',(x.name_ko||x.name_ja)+' 상세 보기');const p=imageEl(x);p.append(el('span','tag',labels[x.series]||x.series),favoriteButton(x));const t=el('div','itemtext');t.append(el('div','ko',x.name_ko||x.name_ja),el('div','ja',x.name_ko?x.name_ja:'한국어 번역 미등록'));const foot=el('div','itemfoot');foot.append(el('span','',x.translation_source==='Papago'?'파파고 번역':'공식 일본어명'),el('span','','자세히 ↗'));t.append(foot);c.append(p,t);c.onclick=()=>showModal(x);c.onkeydown=e=>{if(e.target===c&&(e.key==='Enter'||e.key===' ')){e.preventDefault();showModal(x);}};grid.append(c)}
 $('#more').hidden=visible>=arr.length;$('#more').textContent=`더 보기 (${Math.min(visible,arr.length)} / ${arr.length})`;}
-async function load(){try{const res=await fetch('/api/outfits');if(!res.ok)throw new Error('HTTP '+res.status);const d=await res.json();all=d.items||[];render();$('#notice').textContent=all.length?'공식 일본어명과 등록된 파파고 한국어명으로 검색할 수 있어요. 즐겨찾기는 이 기기에만 저장돼요.':'코디 데이터가 아직 등록되지 않았습니다. 관리자가 공식 목록을 가져오면 검색할 수 있어요.';}catch{$('#notice').textContent='검색 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.';}}
+async function load(){try{
+  const res=await fetch('/api/outfits',{cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);
+  const d=await res.json();all=d.items||[];render();
+  const withImages=all.filter(x=>x.image_url).length;
+  const busy=Boolean(d.status?.running);
+  $('#notice').textContent=all.length
+    ? (busy ? `공식 코디 이미지를 불러오는 중이에요 (${withImages}/${all.length}개 연결). 잠시 후 자동 갱신됩니다.` : `일본어 코디명과 등록된 한국어명으로 검색할 수 있어요. 이미지 연결 ${withImages}/${all.length}개.`)
+    : '코디 데이터를 아직 등록하지 못했어요.';
+  if((busy || (all.length>0 && withImages===0)) && imagePolls<12){
+    imagePolls++;
+    clearTimeout(imagePollTimer);
+    imagePollTimer=setTimeout(load,5000);
+  }
+}catch{$('#notice').textContent='검색 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.';}}
 $('#query').addEventListener('input',e=>{query=e.target.value.trim();visible=40;render();});$('#searchbtn').onclick=()=>{query=$('#query').value.trim();visible=40;render();};$('#clear').onclick=()=>{$('#query').value='';query='';visible=40;render();$('#query').focus();};document.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>{$('#query').value=b.dataset.q;query=b.dataset.q;visible=40;render();});
 $('#chips').onclick=e=>{const b=e.target.closest('[data-series]');if(!b)return;series=b.dataset.series;visible=40;document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===b));$('#series').value=series;render();};
 const select=$('#series');for(const [id,name] of Object.entries(labels)){const o=el('option','',name);o.value=id;select.append(o);}select.onchange=()=>{series=select.value;visible=40;document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x.dataset.series===series));render();};
