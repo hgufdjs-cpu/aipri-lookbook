@@ -150,8 +150,42 @@ def parse_page(html, url):
         if alt in seen:
             continue
         seen.add(alt)
-        items.append((alt, full))
+        # Only accept a separately referenced popup/detail image, not a thumbnail or banner.
+        portrait = fullbody_candidate(img, url)
+        items.append((alt, portrait))
     return items
+
+
+def fullbody_candidate(img, page_url):
+    """Find the popup's actual image URL in item markup, without guessing a filename."""
+    scopes = []
+    node = img
+    for _ in range(5):
+        if node is None: break
+        scopes.append(node)
+        node = node.parent
+    candidates = []
+    for depth, scope in enumerate(scopes):
+        for tag in [scope] + list(scope.find_all(['a', 'img'], recursive=True))[:16]:
+            for key in ('data-full', 'data-full-image', 'data-large', 'data-image',
+                        'data-modal', 'data-modal-src', 'data-src', 'href', 'src'):
+                value = tag.get(key)
+                if not value or not isinstance(value, str): continue
+                absolute = urljoin(page_url, value)
+                if not valid_image(absolute): continue
+                path = urlparse(absolute).path.lower()
+                if not re.search(r'\.(?:png|webp|jpe?g)$', path): continue
+                if any(t in path for t in ('banner', 'bnr', 'logo', 'icon', 'title', 'button')): continue
+                if '/verse/item/img/' not in path: continue
+                score = 15 if key in ('data-full', 'data-full-image', 'data-large', 'data-modal-src') else 0
+                score += 10 if any(t in path for t in ('modal', 'large', 'detail', 'full')) else 0
+                score -= 12 if any(t in path for t in ('thumb', 'thumbnail', '_s.')) else 0
+                score -= depth * 3
+                candidates.append((score, absolute))
+        if candidates and max(x[0] for x in candidates) >= 12: break
+    if not candidates: return None
+    best = max(candidates, key=lambda x:x[0])
+    return best[1] if best[0] >= 10 and best[1] != urljoin(page_url, img.get('src', '')) else None
 
 def fetch_page(page):
     slug, label = page
