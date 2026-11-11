@@ -12,7 +12,7 @@ function norm(s){return (s||'').normalize('NFKC').replace(/\s/g,'').toLocaleLowe
 // Offline Korean naming layer. This is NOT Papago and is intentionally labeled as provisional.
 // Keep Japanese originals and any verified server-provided Korean translation intact.
 const KO_WORDS = Object.entries({
- 'ハッピーバースデー':'해피 버스데이','サイリウム':'사이리움','スイート':'스위트','いちご':'딸기',
+ 'ジュリア':'쥬리아','じゅりあ':'쥬리아','すばる':'스바루','おとめ':'오토메','ビビ':'비비','ハッピーバースデー':'해피 버스데이','サイリウム':'사이리움','スイート':'스위트','いちご':'딸기',
  'グリーン':'그린','ピンク':'핑크','ブルー':'블루','レッド':'레드','ホワイト':'화이트','ブラック':'블랙',
  'イエロー':'옐로','パープル':'퍼플','オレンジ':'오렌지','ミント':'민트','クリーム':'크림',
  'レインボー':'레인보우','ナイト':'나이트','ローズ':'로즈','リボン':'리본','ハート':'하트',
@@ -37,7 +37,7 @@ const KO_WORDS = Object.entries({
  'すみっコぐらし':'스밋코구라시','リラックマ':'리락쿠마',
  'センチメンタルサーカス':'센티멘털 서커스','メルティ':'멜티','リリィ':'릴리'
 }).sort((a,b)=>b[0].length-a[0].length);
-const KANA_ROMA = {'キャ':'캬','キュ':'큐','キョ':'쿄','シャ':'샤','シュ':'슈','ショ':'쇼','チャ':'차','チュ':'추','チョ':'초','ニャ':'냐','ニュ':'뉴','ニョ':'뇨','ミャ':'먀','ミュ':'뮤','ミョ':'묘','リャ':'랴','リュ':'류','リョ':'료','ファ':'파','フィ':'피','フェ':'페','フォ':'포','ティ':'티','ディ':'디','ウィ':'위','ウェ':'웨','ウォ':'워',
+const KANA_ROMA = {'ジャ':'쟈','ジュ':'쥬','ジョ':'죠','ジェ':'제','ジィ':'지','ギャ':'갸','ギュ':'규','ギョ':'교','ビャ':'뱌','ビュ':'뷰','ビョ':'뵤','ピャ':'퍄','ピュ':'퓨','ピョ':'표','キャ':'캬','キュ':'큐','キョ':'쿄','シャ':'샤','シュ':'슈','ショ':'쇼','チャ':'차','チュ':'추','チョ':'초','ニャ':'냐','ニュ':'뉴','ニョ':'뇨','ミャ':'먀','ミュ':'뮤','ミョ':'묘','リャ':'랴','リュ':'류','リョ':'료','ファ':'파','フィ':'피','フェ':'페','フォ':'포','ティ':'티','ディ':'디','ウィ':'위','ウェ':'웨','ウォ':'워',
  'ア':'아','イ':'이','ウ':'우','エ':'에','オ':'오','カ':'카','キ':'키','ク':'쿠','ケ':'케','コ':'코','サ':'사','シ':'시','ス':'스','セ':'세','ソ':'소','タ':'타','チ':'치','ツ':'츠','テ':'테','ト':'토','ナ':'나','ニ':'니','ヌ':'누','ネ':'네','ノ':'노','ハ':'하','ヒ':'히','フ':'후','ヘ':'헤','ホ':'호','マ':'마','ミ':'미','ム':'무','メ':'메','モ':'모','ヤ':'야','ユ':'유','ヨ':'요','ラ':'라','リ':'리','ル':'루','レ':'레','ロ':'로','ワ':'와','ヲ':'오','ン':'ㄴ','ガ':'가','ギ':'기','グ':'구','ゲ':'게','ゴ':'고','ザ':'자','ジ':'지','ズ':'즈','ゼ':'제','ゾ':'조','ダ':'다','ヂ':'지','ヅ':'즈','デ':'데','ド':'도','バ':'바','ビ':'비','ブ':'부','ベ':'베','ボ':'보','パ':'파','ピ':'피','プ':'푸','ペ':'페','ポ':'포','ッ':'','ー':''};
 function roughKo(ja){
   let t=ja, placeholders=[];
@@ -78,7 +78,7 @@ function showModal(x){const b=$('#modalBody');b.replaceChildren();const photo=im
 // Exclude only confirmed promotional placeholder cards; preserve actual Birthday color outfits.
 const HIDDEN_PROMOTIONAL_NAMES=new Set(['ハッピーバースデー！コーデ']);
 const isHiddenPromotional=x=>HIDDEN_PROMOTIONAL_NAMES.has((x.name_ja||'').normalize('NFKC').trim());
-function results(){const q=norm(query);let arr=all.filter(x=>!isHiddenPromotional(x)&&(series==='all'||x.series===series)&&(!onlyFavorites||favorites.has(keyOf(x)))&&(!q||norm(x.name_ko).includes(q)||norm(x.name_ja).includes(q)));
+function results(){const q=norm(query);let arr=all.filter(x=>!isHiddenPromotional(x)&&(series==='all'||x.series===series)&&(!onlyFavorites||favorites.has(keyOf(x)))&&(!q||norm(x.name_ko).includes(q)||norm(x.name_ja).includes(q)||norm(x.name_ko).replaceAll('쥬','주').includes(q)));
 if(sortMode==='az')arr.sort((a,b)=>(a.name_ko||a.name_ja).localeCompare(b.name_ko||b.name_ja,'ko'));else if(sortMode==='za')arr.sort((a,b)=>(b.name_ko||b.name_ja).localeCompare(a.name_ko||a.name_ja,'ko'));return arr;}
 function render(){const arr=results();$('#count').textContent=arr.length;$('#favoritesCount').textContent=favorites.size;$('#favoritesOnly').classList.toggle('active',onlyFavorites);$('#favoritesOnly').setAttribute('aria-pressed',String(onlyFavorites));const grid=$('#grid');grid.replaceChildren();$('#empty').hidden=!!arr.length;$('#emptyDescription').textContent=onlyFavorites?'즐겨찾기를 해제하거나 다른 조건으로 검색해 보세요.':'다른 키워드나 일본어 이름으로 검색해 보세요.';
 for(const x of arr.slice(0,visible)){const c=el('article','item');c.tabIndex=0;c.setAttribute('role','button');c.setAttribute('aria-label',(x.name_ko||x.name_ja)+' 상세 보기');const p=imageEl(x);p.append(el('span','tag',labels[x.series]||x.series),favoriteButton(x));const t=el('div','itemtext');t.append(el('div','ko',x.name_ko||x.name_ja),el('div','ja',x.name_ko?x.name_ja:'한국어 표기 검토 중'));const foot=el('div','itemfoot');foot.append(el('span','',x.translation_source==='Papago'?'파파고 번역':x.translation_source==='Draft'?'한국어 임시 표기':'공식 일본어명'),el('span','','자세히 ↗'));t.append(foot);c.append(p,t);c.onclick=()=>showModal(x);c.onkeydown=e=>{if(e.target===c&&(e.key==='Enter'||e.key===' ')){e.preventDefault();showModal(x);}};grid.append(c)}
