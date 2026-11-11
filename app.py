@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
 load_dotenv()
-app = Flask(__name__)
+app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='/static')
 DB_PATH = os.environ.get('DB_PATH', os.path.join(os.path.dirname(__file__), 'aipri.db'))
 os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
 ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
